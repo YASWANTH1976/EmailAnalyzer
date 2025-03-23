@@ -9,7 +9,7 @@ import json
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
-
+os.makedirs('uploads', exist_ok=True)
 app = Flask(__name__)
 
 # Download required NLTK data
@@ -243,4 +243,4 @@ def index():
     return render_template('index.html', results=results, error=error, file_saved=file_saved, predefined_emails=predefined_emails, analytics=analytics, search_query=search_query)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
