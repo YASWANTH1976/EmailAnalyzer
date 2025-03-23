@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Sentiment & Priority Analyzer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+        h1 { color: #333; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        .form-section, .results, .analytics { margin-top: 20px; }
+        select, input, textarea { width: 100%; padding: 8px; margin: 5px 0; }
+        button { background-color: #4CAF50; color: white; padding: 10px; border: none; cursor: pointer; margin: 5px 0; }
+        button:hover { background-color: #45a049; }
+        .error { color: red; }
+        .success { color: green; }
+        .highlight-high { background-color: #ffcccc; font-weight: bold; }
+        .highlight-medium { background-color: #fff3cc; font-weight: bold; }
+        .highlight-low { background-color: #e6ffe6; font-weight: bold; }
+        .spam { border: 2px solid red; }
+        .analytics { background-color: #f0f0f0; padding: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Email Sentiment & Priority Analyzer</h1>
+
+        <!-- Single Email Selection Form -->
+        <div class="form-section">
+            <h2>Analyze Single Email</h2>
+            <form method="POST">
+                <label for="email_select">Select an Email:</label><br>
+                <select id="email_select" name="email_select">
+                    {% for email in predefined_emails %}
+                        <option value="{{ loop.index0 }}">{{ email.subject }}</option>
+                    {% endfor %}
+                </select><br>
+                <button type="submit">Analyze</button>
+            </form>
+        </div>
+
+        <!-- File Upload Form -->
+        <div class="form-section">
+            <h2>Analyze Emails from File</h2>
+            <form method="POST" enctype="multipart/form-data">
+                <label for="file">Upload a .txt file:</label><br>
+                <input type="file" id="file" name="file" accept=".txt"><br>
+                <label><input type="checkbox" name="save" value="yes"> Save results to text file</label><br>
+                <button type="submit">Analyze File</button>
+            </form>
+        </div>
+
+        <!-- Search Bar -->
+        <div class="form-section">
+            <form method="GET">
+                <label for="search">Search Results:</label><br>
+                <input type="text" id="search" name="search" value="{{ search_query }}" placeholder="Enter keyword to filter results"><br>
+                <button type="submit">Search</button>
+            </form>
+        </div>
+
+        <!-- Analytics Section -->
+        {% if analytics %}
+            <div class="analytics">
+                <h3>Analytics</h3>
+                <p>Total Emails: {{ analytics.total }}</p>
+                <p>High Priority: {{ analytics.high|round(1) }}%</p>
+                <p>Medium Priority: {{ analytics.medium|round(1) }}%</p>
+                <p>Low Priority: {{ analytics.low|round(1) }}%</p>
+                <p>Potential Spam: {{ analytics.spam|round(1) }}%</p>
+            </div>
+        {% endif %}
+
+        <!-- Results Section -->
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
+        {% if file_saved %}
+            <p class="success">Results saved to {{ file_saved }}</p>
+        {% endif %}
+        {% if results %}
+            <div class="results">
+                <h2>Results</h2>
+                <form method="POST">
+                    <button type="submit" name="export_csv" value="yes">Export to CSV</button>
+                    <button type="submit" name="export_pdf" value="yes">Export to PDF</button>
+                </form>
+                {% for result in results %}
+                    <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0;" class="{{ 'spam' if result.is_spam else '' }}">
+                        <p><strong>Subject:</strong> {{ result.subject }}</p>
+                        <p><strong>Body:</strong> 
+                            {% for word in result.body.split() %}
+                                {% if word|lower in result.keywords %}
+                                    <span class="highlight-{{ result.priority|lower }}">{{ word }}</span>
+                                {% else %}
+                                    {{ word }}
+                                {% endif %}
+                            {% endfor %}
+                        </p>
+                        <p><strong>Summary:</strong> {{ result.summary }}</p>
+                        <p><strong>Sentiment:</strong> {{ result.sentiment }} (Pos: {{ result.pos_score|round(1) }}%, Neg: {{ result.neg_score|round(1) }}%, Neu: {{ result.neu_score|round(1) }}%)</p>
+                        <p><strong>Priority:</strong> {{ result.priority }} (Keywords: {{ result.keywords|join(', ') }})</p>
+                        <p><strong>Categories:</strong> {{ result.categories|join(', ') }}</p>
+                        <p><strong>Tone:</strong> {{ result.tone }}</p>
+                        <p><strong>Spam Risk:</strong> {{ 'Yes' if result.is_spam else 'No' }}</p>
+                        <p><strong>Suggestion:</strong> {{ result.suggestion }}</p>
+                        <p><strong>Response Time:</strong> {{ result.response_time }}</p>
+                        <p><strong>Reply Suggestion:</strong> <pre>{{ result.reply_suggestion }}</pre></p>
+                        <form method="POST">
+                            <input type="hidden" name="email_id" value="{{ result.subject }}">
+                            <label>Feedback:</label>
+                            <select name="feedback">
+                                <option value="correct">Correct</option>
+                                <option value="incorrect">Incorrect</option>
+                            </select>
+                            <button type="submit">Submit Feedback</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
