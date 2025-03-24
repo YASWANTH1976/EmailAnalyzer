@@ -1,246 +1,293 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_sqlalchemy import SQLAlchemy
+import os
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from nltk.tokenize import sent_tokenize
-import os
-import csv
-from io import StringIO
-import json
+import io
+from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet
-os.makedirs('uploads', exist_ok=True)
-app = Flask(__name__)
+from datetime import datetime
 
-# Download required NLTK data
+# Download NLTK data
 nltk.download('vader_lexicon')
 nltk.download('punkt')
 
-# Initialize the sentiment analyzer
-sid = SentimentIntensityAnalyzer()
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SESSION_TYPE'] = 'filesystem'  # Enable session support
 
-# Priority, category, tone, and spam keywords
-high_priority_keywords = ['urgent', 'asap', 'immediately', 'critical', 'emergency']
-medium_priority_keywords = ['soon', 'please', 'today', 'quickly']
-low_priority_keywords = ['whenever', 'no rush', 'later']
-category_keywords = {
-    'Technical': ['server', 'fix', 'issue', 'error', 'bug', 'crash', 'system'],
-    'Meeting': ['discuss', 'meeting', 'timeline', 'availability', 'schedule'],
-    'Feedback': ['feedback', 'suggestion', 'update', 'review', 'opinion'],
-    'Sales': ['order', 'purchase', 'invoice', 'payment', 'deal'],
-    'Support': ['help', 'support', 'problem', 'assistance', 'query']
-}
-tone_keywords = {
-    'Formal': ['regards', 'sincerely', 'respectfully', 'please', 'thank you'],
-    'Casual': ['hey', 'hi', 'cool', 'chill', 'buddy'],
-    'Angry': ['unacceptable', 'angry', 'furious', 'disappointing', 'outrage']
-}
-spam_keywords = ['win', 'free', 'prize', 'click here', 'urgent money', 'verify your account']
+# Initialize extensions
+db = SQLAlchemy(app)
+login_manager = LoginManager(app)
+login_manager.login_view = 'login'
 
-# Predefined emails with longer bodies
-predefined_emails = [
-    {"subject": "Urgent: Server Down", "body": "Our main server has been down since 9 AM this morning. This is a critical issue affecting all users. Please fix this immediately to restore service. Contact me if you need more details or access logs. Time is of the essence!"},
-    {"subject": "Meeting Today", "body": "Hi team, can we discuss the project timeline soon? I’d like to go over the milestones and resource allocation for the next sprint. Please let me know your availability today so we can set something up quickly. Thanks for your cooperation!"},
-    {"subject": "No Rush", "body": "Hello, I just wanted to share some feedback on the recent update. It’s not urgent, so take your time replying to this. Whenever you get a chance, let me know how we can incorporate these suggestions into the next release. No pressure at all!"}
-]
+# User Model
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=False)
 
-# Feedback storage
-FEEDBACK_FILE = 'feedback.json'
-if not os.path.exists(FEEDBACK_FILE):
-    with open(FEEDBACK_FILE, 'w') as f:
-        json.dump({}, f)
+# Analysis Model (for storing user-specific analysis history)
+class Analysis(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subject = db.Column(db.String(200))
+    sentiment = db.Column(db.String(50))
+    priority = db.Column(db.String(50))
+    tone = db.Column(db.String(50))
+    categories = db.Column(db.String(200))
+    spam_phishing = db.Column(db.String(50))
+    summary = db.Column(db.Text)
+    reply_suggestion = db.Column(db.Text)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
-# Function to analyze email
-def analyze_email(subject, body, language='en'):
-    full_text = subject + " " + body
-    full_text_lower = full_text.lower()
-    sentiment_scores = sid.polarity_scores(full_text)
-    compound_score = sentiment_scores['compound']
-    pos_score = sentiment_scores['pos'] * 100
-    neg_score = sentiment_scores['neg'] * 100
-    neu_score = sentiment_scores['neu'] * 100
+    user = db.relationship('User', backref=db.backref('analyses', lazy=True))
 
-    # Sentiment
-    sentiment = "Positive" if compound_score >= 0.05 else "Negative" if compound_score <= -0.05 else "Neutral"
+# Email Model (for predefined emails)
+class Email:
+    def __init__(self, id, subject, body):
+        self.id = id
+        self.subject = subject
+        self.body = body
 
-    # Priority
-    triggered_keywords = []
-    if any(kw in full_text_lower for kw in high_priority_keywords):
-        priority = "High"
-        triggered_keywords = [kw for kw in high_priority_keywords if kw in full_text_lower]
-    elif any(kw in full_text_lower for kw in medium_priority_keywords):
-        priority = "Medium"
-        triggered_keywords = [kw for kw in medium_priority_keywords if kw in full_text_lower]
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Load predefined emails from emails.txt
+def load_emails():
+    emails = []
+    try:
+        with open('emails.txt', 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for i in range(0, len(lines), 2):
+                subject = lines[i].strip()
+                body = lines[i+1].strip()
+                emails.append(Email(i//2 + 1, subject, body))
+    except FileNotFoundError:
+        print("emails.txt not found. Please create the file with email data.")
+    return emails
+
+# Analyze email (with improved priority detection)
+def analyze_email(subject, body):
+    sia = SentimentIntensityAnalyzer()
+    scores = sia.polarity_scores(body)
+    sentiment = 'positive' if scores['compound'] > 0.05 else 'negative' if scores['compound'] < -0.05 else 'neutral'
+
+    # Combine subject and body for keyword checks
+    combined_text = (subject + " " + body).lower()
+
+    # Determine priority with expanded keywords
+    high_priority_keywords = ['urgent', 'asap', 'immediately', 'critical']
+    medium_priority_keywords = ['important', 'please', 'soon']
+    low_priority_keywords = ['no rush', 'whenever', 'at your convenience']
+
+    if any(kw in combined_text for kw in low_priority_keywords):
+        priority = 'low'  # Low priority overrides others
+    elif any(kw in combined_text for kw in high_priority_keywords):
+        priority = 'high'
+    elif any(kw in combined_text for kw in medium_priority_keywords):
+        priority = 'medium'
     else:
-        priority = "Low"
-        triggered_keywords = [kw for kw in low_priority_keywords if kw in full_text_lower] or ["none"]
+        priority = 'low'
 
-    # Categories (multi-category)
-    categories = [cat for cat, kws in category_keywords.items() if any(kw in full_text_lower for kw in kws)]
-
-    # Tone
-    tones = [tone for tone, kws in tone_keywords.items() if any(kw in full_text_lower for kw in kws)]
-    tone = tones[0] if tones else "Neutral"
-
-    # Spam/Phishing Detection
-    is_spam = any(kw in full_text_lower for kw in spam_keywords)
-
-    # Summarization
-    sentences = sent_tokenize(full_text)
-    summary = " ".join(sentences[:2]) if len(sentences) > 2 else full_text
-
-    # Actionable suggestion and response time
-    if is_spam:
-        suggestion = "Flag as potential spam/phishing and avoid responding."
-        response_time = "N/A"
-    elif priority == "High" and sentiment == "Negative":
-        suggestion = "Escalate to IT/supervisor immediately."
-        response_time = "Within 1 hour"
-    elif priority == "High":
-        suggestion = "Address promptly with relevant team."
-        response_time = "Within 4 hours"
-    elif priority == "Medium" and sentiment == "Negative":
-        suggestion = "Review and respond with clarification."
-        response_time = "Within 24 hours"
-    elif priority == "Medium":
-        suggestion = "Schedule a follow-up if needed."
-        response_time = "Within 48 hours"
-    else:
-        suggestion = "Reply at your convenience."
-        response_time = "Within 1 week"
-
-    # Automated reply suggestion
-    if is_spam:
-        reply_suggestion = "N/A"
-    elif sentiment == "Negative":
-        reply_suggestion = f"Subject: Re: {subject}\n\nDear sender, I’m sorry to hear about this issue. {suggestion} I’ll ensure it’s addressed promptly. Please let me know if you need further assistance."
-    else:
-        reply_suggestion = f"Subject: Re: {subject}\n\nHi, thanks for your email! {suggestion} I’ll get back to you soon with more details."
-
+    tone = 'formal' if 'dear' in combined_text else 'casual'
+    categories = ['Technical'] if 'error' in combined_text else ['General']
+    spam_phishing = 'Yes' if 'win a prize' in combined_text else 'No'
+    summary = body[:50] + '...' if len(body) > 50 else body
+    reply_suggestion = 'Thank you for your email.' if sentiment == 'positive' else 'I’m sorry to hear about your issue.'
     return {
-        'subject': subject, 'body': body, 'sentiment': sentiment, 'priority': priority, 'keywords': triggered_keywords,
-        'pos_score': pos_score, 'neg_score': neg_score, 'neu_score': neu_score, 'categories': categories or ["Unknown"],
-        'tone': tone, 'is_spam': is_spam, 'summary': summary, 'suggestion': suggestion, 'response_time': response_time,
-        'reply_suggestion': reply_suggestion, 'language': language
+        'subject': subject,
+        'sentiment': sentiment,
+        'priority': priority,
+        'tone': tone,
+        'categories': categories,
+        'spam_phishing': spam_phishing,
+        'summary': summary,
+        'reply_suggestion': reply_suggestion
     }
 
-# Function to process emails from a file
-def process_file(file_path):
-    results = []
-    if not os.path.exists(file_path):
-        return None
-    with open(file_path, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
-        for i in range(0, len(lines), 2):
-            subject = lines[i].strip()
-            body = lines[i + 1].strip() if i + 1 < len(lines) else ""
-            results.append(analyze_email(subject, body))
-    return sorted(results, key=lambda x: {'High': 0, 'Medium': 1, 'Low': 2}[x['priority']])  # Sort by priority
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        user = User.query.filter_by(username=username, password=password).first()
+        if user:
+            login_user(user)
+            flash('Logged in successfully!', 'success')
+            return redirect(url_for('index'))
+        flash('Invalid username or password.', 'error')
+    return render_template('login.html')
 
-# Function to save results to text
-def save_results_txt(results):
-    with open('results.txt', 'w', encoding='utf-8') as file:
-        for i, res in enumerate(results, 1):
-            file.write(f"Email {i}: {res['subject']}\n{res['body']}\nSentiment: {res['sentiment']} (Pos: {res['pos_score']:.1f}%, Neg: {res['neg_score']:.1f}%, Neu: {res['neu_score']:.1f}%)\nPriority: {res['priority']} (Keywords: {', '.join(res['keywords'])})\nCategories: {', '.join(res['categories'])}\nTone: {res['tone']}\nSpam: {res['is_spam']}\nSummary: {res['summary']}\nSuggestion: {res['suggestion']}\nResponse Time: {res['response_time']}\nReply Suggestion: {res['reply_suggestion']}\n------------------------\n")
-    return 'results.txt'
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if User.query.filter_by(username=username).first():
+            flash('Username already exists.', 'error')
+        else:
+            new_user = User(username=username, password=password)
+            db.session.add(new_user)
+            db.session.commit()
+            flash('Account created successfully! Please log in.', 'success')
+            return redirect(url_for('login'))
+    return render_template('signup.html')
 
-# Function to save results to CSV
-def save_results_csv(results):
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=['subject', 'body', 'sentiment', 'priority', 'keywords', 'pos_score', 'neg_score', 'neu_score', 'categories', 'tone', 'is_spam', 'summary', 'suggestion', 'response_time', 'reply_suggestion'])
-    writer.writeheader()
-    for res in results:
-        res['keywords'] = ', '.join(res['keywords'])
-        res['categories'] = ', '.join(res['categories'])
-        writer.writerow(res)
-    output.seek(0)
-    return output
-
-# Function to save results to PDF
-def save_results_pdf(results):
-    pdf_file = 'results.pdf'
-    doc = SimpleDocTemplate(pdf_file, pagesize=letter)
-    styles = getSampleStyleSheet()
-    story = []
-    for i, res in enumerate(results, 1):
-        story.append(Paragraph(f"Email {i}: {res['subject']}", styles['Heading2']))
-        story.append(Paragraph(f"Body: {res['body']}", styles['BodyText']))
-        story.append(Paragraph(f"Sentiment: {res['sentiment']} (Pos: {res['pos_score']:.1f}%, Neg: {res['neg_score']:.1f}%, Neu: {res['neu_score']:.1f}%)", styles['BodyText']))
-        story.append(Paragraph(f"Priority: {res['priority']} (Keywords: {', '.join(res['keywords'])})", styles['BodyText']))
-        story.append(Paragraph(f"Categories: {', '.join(res['categories'])}", styles['BodyText']))
-        story.append(Paragraph(f"Tone: {res['tone']}", styles['BodyText']))
-        story.append(Paragraph(f"Spam: {res['is_spam']}", styles['BodyText']))
-        story.append(Paragraph(f"Summary: {res['summary']}", styles['BodyText']))
-        story.append(Paragraph(f"Suggestion: {res['suggestion']}", styles['BodyText']))
-        story.append(Paragraph(f"Response Time: {res['response_time']}", styles['BodyText']))
-        story.append(Paragraph(f"Reply Suggestion: {res['reply_suggestion']}", styles['BodyText']))
-        story.append(Spacer(1, 12))
-    doc.build(story)
-    return pdf_file
-
-# Function to calculate analytics
-def get_analytics(results):
-    total = len(results)
-    if total == 0:
-        return {}
-    high = sum(1 for r in results if r['priority'] == 'High') / total * 100
-    medium = sum(1 for r in results if r['priority'] == 'Medium') / total * 100
-    low = sum(1 for r in results if r['priority'] == 'Low') / total * 100
-    spam = sum(1 for r in results if r['is_spam']) / total * 100
-    return {'high': high, 'medium': medium, 'low': low, 'spam': spam, 'total': total}
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    # Clear session data on logout
+    session.pop('analysis_results', None)
+    flash('Logged out successfully!', 'success')
+    return redirect(url_for('login'))
 
 @app.route('/', methods=['GET', 'POST'])
+@login_required
 def index():
-    results = None
-    error = None
-    file_saved = None
-    analytics = None
-    search_query = request.args.get('search', '')
+    emails = load_emails()
+    analysis_results = session.get('analysis_results', [])
+    analyses = Analysis.query.filter_by(user_id=current_user.id).order_by(Analysis.timestamp.desc()).all()
+    analytics = {
+        'total_emails': 0,
+        'positive': 0,
+        'negative': 0,
+        'neutral': 0,
+        'high_priority': 0,
+        'medium_priority': 0,
+        'low_priority': 0
+    }
 
+    # Handle search and sort (GET request)
+    search_query = request.args.get('search', '').lower()
+    sort_by = request.args.get('sort', 'priority')
+
+    # Filter results based on search query
+    if search_query and analysis_results:
+        analysis_results = [
+            result for result in analysis_results
+            if search_query in result['subject'].lower() or search_query in result['summary'].lower()
+        ]
+
+    # Sort results
+    if sort_by == 'priority':
+        analysis_results.sort(key=lambda x: {'high': 0, 'medium': 1, 'low': 2}.get(x['priority'], 3))
+    elif sort_by == 'sentiment':
+        analysis_results.sort(key=lambda x: x['sentiment'])
+    elif sort_by == 'tone':
+        analysis_results.sort(key=lambda x: x['tone'])
+
+    # Handle email analysis (POST request)
     if request.method == 'POST':
         if 'email_select' in request.form:
-            email_index = int(request.form['email_select'])
-            selected_email = predefined_emails[email_index]
-            results = [analyze_email(selected_email['subject'], selected_email['body'])]
-        elif 'file' in request.files:
-            file = request.files['file']
-            if file.filename == '':
-                error = "No file selected."
-            elif not file.filename.endswith('.txt'):
-                error = "Please upload a .txt file."
-            else:
-                file_path = os.path.join('uploads', file.filename)
-                if not os.path.exists('uploads'):
-                    os.makedirs('uploads')
-                file.save(file_path)
-                results = process_file(file_path)
-                if results is None:
-                    error = f"Error processing file '{file.filename}'."
-                elif 'save' in request.form and request.form['save'] == 'yes':
-                    file_saved = save_results_txt(results)
-                analytics = get_analytics(results)
+            selected_ids = request.form.getlist('email_select')
+            selected_emails = [e for e in emails if str(e.id) in selected_ids]
+            analysis_results = [analyze_email(email.subject, email.body) for email in selected_emails]
+        elif 'email_file' in request.files:
+            file = request.files['email_file']
+            if file and file.filename.endswith('.txt'):
+                content = file.read().decode('utf-8')
+                lines = content.split('\n')
+                subject = lines[0].strip()
+                body = '\n'.join(lines[1:]).strip()
+                analysis_results = [analyze_email(subject, body)]
 
-        # Feedback submission
-        if 'feedback' in request.form:
-            email_id = request.form['email_id']
-            feedback = request.form['feedback']
-            with open(FEEDBACK_FILE, 'r+') as f:
-                data = json.load(f)
-                data[email_id] = feedback
-                f.seek(0)
-                json.dump(data, f)
+        if analysis_results:
+            # Save analysis results to database
+            for result in analysis_results:
+                analysis = Analysis(
+                    user_id=current_user.id,
+                    subject=result['subject'],
+                    sentiment=result['sentiment'],
+                    priority=result['priority'],
+                    tone=result['tone'],
+                    categories=','.join(result['categories']),
+                    spam_phishing=result['spam_phishing'],
+                    summary=result['summary'],
+                    reply_suggestion=result['reply_suggestion']
+                )
+                db.session.add(analysis)
+            db.session.commit()
 
-        # Export options
-        if 'export_csv' in request.form and results:
-            return send_file(save_results_csv(results), mimetype='text/csv', as_attachment=True, download_name='email_analysis_results.csv')
-        if 'export_pdf' in request.form and results:
-            return send_file(save_results_pdf(results), as_attachment=True, download_name='email_analysis_results.pdf')
+            # Update analytics
+            analytics['total_emails'] = len(analysis_results)
+            for result in analysis_results:
+                if result['sentiment'] == 'positive':
+                    analytics['positive'] += 1
+                elif result['sentiment'] == 'negative':
+                    analytics['negative'] += 1
+                else:
+                    analytics['neutral'] += 1
+                if result['priority'] == 'high':
+                    analytics['high_priority'] += 1
+                elif result['priority'] == 'medium':
+                    analytics['medium_priority'] += 1
+                else:
+                    analytics['low_priority'] += 1
+            # Store analysis results in session
+            session['analysis_results'] = analysis_results
 
-    # Filter results by search query
-    if results and search_query:
-        results = [r for r in results if search_query.lower() in r['subject'].lower() or search_query.lower() in r['body'].lower()]
+    return render_template('index.html', emails=emails, analysis_results=analysis_results, analytics=analytics, analyses=analyses)
 
-    return render_template('index.html', results=results, error=error, file_saved=file_saved, predefined_emails=predefined_emails, analytics=analytics, search_query=search_query)
+@app.route('/export', methods=['POST'])
+@login_required
+def export():
+    analysis_results = session.get('analysis_results', [])
+    if not analysis_results:
+        flash('No analysis results to export.', 'error')
+        return redirect(url_for('index'))
+
+    export_type = request.form['export_type']
+    
+    if export_type == 'csv':
+        output = io.StringIO()
+        output.write('Subject,Sentiment,Priority,Tone,Categories,Spam/Phishing,Summary,Reply Suggestion\n')
+        for result in analysis_results:
+            output.write(f"{result['subject']},{result['sentiment']},{result['priority']},{result['tone']},{','.join(result['categories'])},{result['spam_phishing']},{result['summary']},{result['reply_suggestion']}\n")
+        output.seek(0)
+        return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/csv', as_attachment=True, download_name='analysis_results.csv')
+    
+    elif export_type == 'pdf':
+        buffer = io.BytesIO()
+        p = canvas.Canvas(buffer, pagesize=letter)
+        y = 750
+        p.drawString(100, y, "Analysis Results")
+        y -= 20
+        for result in analysis_results:
+            p.drawString(100, y, f"Subject: {result['subject']}")
+            y -= 20
+            p.drawString(100, y, f"Sentiment: {result['sentiment']}")
+            y -= 20
+            p.drawString(100, y, f"Priority: {result['priority']}")
+            y -= 20
+            if y < 50:
+                p.showPage()
+                y = 750
+        p.showPage()
+        p.save()
+        buffer.seek(0)
+        return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name='analysis_results.pdf')
+    
+    elif export_type == 'txt':
+        output = io.StringIO()
+        for result in analysis_results:
+            output.write(f"Subject: {result['subject']}\n")
+            output.write(f"Sentiment: {result['sentiment']}\n")
+            output.write(f"Priority: {result['priority']}\n")
+            output.write(f"Tone: {result['tone']}\n")
+            output.write(f"Categories: {','.join(result['categories'])}\n")
+            output.write(f"Spam/Phishing: {result['spam_phishing']}\n")
+            output.write(f"Summary: {result['summary']}\n")
+            output.write(f"Reply Suggestion: {result['reply_suggestion']}\n\n")
+        output.seek(0)
+        return send_file(io.BytesIO(output.getvalue().encode('utf-8')), mimetype='text/plain', as_attachment=True, download_name='analysis_results.txt')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
