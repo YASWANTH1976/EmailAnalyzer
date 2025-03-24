@@ -4,60 +4,83 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Sentiment & Priority Analyzer</title>
+    <!-- Include Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
+        /* Custom styles for additional enhancements */
+        .priority-high {
+            background-color: #f87171; /* Red for high priority */
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        h1, h2, h3 {
-            color: #333;
+        .priority-medium {
+            background-color: #fbbf24; /* Yellow for medium priority */
+            color: black;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
+        .priority-low {
+            background-color: #34d399; /* Green for low priority */
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
+        .sentiment-positive {
+            background-color: #34d399; /* Green for positive sentiment */
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        th {
-            background-color: #f2f2f2;
+        .sentiment-negative {
+            background-color: #f87171; /* Red for negative sentiment */
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
-        button {
-            cursor: pointer;
-        }
-        .flash-messages {
-            list-style-type: none;
-            padding: 0;
-        }
-        .flash-messages li {
-            padding: 10px;
-            margin: 5px 0;
-            border-radius: 5px;
-        }
-        .flash-messages .success {
-            background-color: #d4edda;
-            color: #155724;
-        }
-        .flash-messages .error {
-            background-color: #f8d7da;
-            color: #721c24;
+        .sentiment-neutral {
+            background-color: #9ca3af; /* Gray for neutral sentiment */
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
         }
     </style>
 </head>
-<body>
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            <ul class="flash-messages">
+<body class="bg-gray-100 font-sans">
+    <!-- Navigation Bar -->
+    <nav class="bg-indigo-600 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold">Email Sentiment & Priority Analyzer</h1>
+            {% if current_user.is_authenticated %}
+                <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded">Logout</a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    <div class="container mx-auto mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
                 {% for category, message in messages %}
-                    <li class="{{ category }}">{{ message }}</li>
+                    <div class="p-4 mb-4 rounded-lg text-white {% if category == 'success' %}bg-green-500{% else %}bg-red-500{% endif %}">
+                        {{ message }}
+                    </div>
                 {% endfor %}
-            </ul>
-        {% endif %}
-    {% endwith %}
-    {% block content %}
-    {% endblock %}
+            {% endif %}
+        {% endwith %}
+    </div>
+
+    <!-- Main Content -->
+    <div class="container mx-auto mt-6 p-6 bg-white rounded-lg shadow-md">
+        {% block content %}
+        {% endblock %}
+    </div>
+
+    <!-- Footer -->
+    <footer class="bg-indigo-600 text-white p-4 mt-6">
+        <div class="container mx-auto text-center">
+            <p>&copy; 2025 Email Sentiment & Priority Analyzer. All rights reserved.</p>
+        </div>
+    </footer>
 </body>
 </html>

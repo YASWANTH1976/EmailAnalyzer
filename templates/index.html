@@ -1,82 +1,140 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h1>Email Sentiment & Priority Analyzer</h1>
-<h2>Welcome, {{ current_user.username }}!</h2>
+<h2 class="text-2xl font-semibold text-gray-800 mb-4">Welcome, {{ current_user.username }}!</h2>
 
-<h3>Analyze Emails</h3>
-<form method="POST" enctype="multipart/form-data">
-    <label for="email_select">Select Predefined Emails:</label><br>
-    <select name="email_select" id="email_select" multiple>
-        <option value="">-- Select Emails --</option>
-        {% for email in emails %}
-            <option value="{{ email.id }}">{{ email.subject }}</option>
-        {% endfor %}
-    </select><br><br>
-    <label>Or Upload a .txt File:</label><br>
-    <input type="file" name="email_file" accept=".txt"><br><br>
-    <button type="submit" style="background-color: green; color: white; padding: 10px 20px;">Analyze</button>
-</form>
+<!-- Analyze Emails Section -->
+<div class="mb-8">
+    <h3 class="text-xl font-semibold text-gray-700 mb-4">Analyze Emails</h3>
+    <form method="POST" enctype="multipart/form-data" class="space-y-4">
+        <div>
+            <label for="email_select" class="block text-gray-600 font-medium mb-2">Select Predefined Emails:</label>
+            <select name="email_select" id="email_select" multiple class="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">-- Select Emails --</option>
+                {% for email in emails %}
+                    <option value="{{ email.id }}">{{ email.subject }}</option>
+                {% endfor %}
+            </select>
+            <p class="text-sm text-gray-500 mt-1">Hold Ctrl (or Command on Mac) to select multiple emails.</p>
+        </div>
+        <div>
+            <label class="block text-gray-600 font-medium mb-2">Or Upload a .txt File:</label>
+            <input type="file" name="email_file" accept=".txt" class="w-full p-2 border rounded-lg">
+        </div>
+        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg">Analyze</button>
+    </form>
+</div>
 
-<h3>Analysis Results</h3>
-<table border="1">
-    <tr>
-        <th>Subject</th>
-        <th>Sentiment</th>
-        <th>Priority</th>
-        <th>Tone</th>
-        <th>Categories</th>
-        <th>Spam/Phishing</th>
-        <th>Summary</th>
-        <th>Reply Suggestion</th>
-    </tr>
-    {% for result in analysis_results %}
-        <tr>
-            <td>{{ result.subject }}</td>
-            <td>{{ result.sentiment }}</td>
-            <td>{{ result.priority }}</td>
-            <td>{{ result.tone }}</td>
-            <td>{{ result.categories | join(', ') }}</td>
-            <td>{{ result.spam_phishing }}</td>
-            <td>{{ result.summary }}</td>
-            <td>{{ result.reply_suggestion }}</td>
-        </tr>
-    {% endfor %}
-</table>
+<!-- Analysis Results Section -->
+<div class="mb-8">
+    <h3 class="text-xl font-semibold text-gray-700 mb-4">Analysis Results</h3>
+    {% if analysis_results %}
+        <div class="overflow-x-auto">
+            <table class="w-full border-collapse bg-white shadow-md rounded-lg">
+                <thead>
+                    <tr class="bg-indigo-100">
+                        <th class="p-3 text-left text-gray-700 font-semibold">Subject</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Sentiment</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Priority</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Tone</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Categories</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Spam/Phishing</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Summary</th>
+                        <th class="p-3 text-left text-gray-700 font-semibold">Reply Suggestion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for result in analysis_results %}
+                        <tr class="border-b">
+                            <td class="p-3">{{ result.subject }}</td>
+                            <td class="p-3">
+                                <span class="sentiment-{{ result.sentiment }}">{{ result.sentiment | capitalize }}</span>
+                            </td>
+                            <td class="p-3">
+                                <span class="priority-{{ result.priority }}">{{ result.priority | capitalize }}</span>
+                            </td>
+                            <td class="p-3">{{ result.tone | capitalize }}</td>
+                            <td class="p-3">{{ result.categories | join(', ') }}</td>
+                            <td class="p-3">{{ result.spam_phishing }}</td>
+                            <td class="p-3">{{ result.summary }}</td>
+                            <td class="p-3">{{ result.reply_suggestion }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="text-gray-500">No analysis results yet. Analyze some emails to see the results here.</p>
+    {% endif %}
+</div>
 
-<h3>Export Results</h3>
-<form method="POST" action="{{ url_for('export') }}">
-    <button type="submit" name="export_type" value="csv" style="background-color: green; color: white; padding: 10px 20px;">Export as CSV</button>
-    <button type="submit" name="export_type" value="pdf" style="background-color: green; color: white; padding: 10px 20px;">Export as PDF</button>
-    <button type="submit" name="export_type" value="txt" style="background-color: green; color: white; padding: 10px 20px;">Export as Text</button>
-</form>
+<!-- Export Results Section -->
+<div class="mb-8">
+    <h3 class="text-xl font-semibold text-gray-700 mb-4">Export Results</h3>
+    <form method="POST" action="{{ url_for('export') }}" class="space-x-4">
+        <button type="submit" name="export_type" value="csv" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg">Export as CSV</button>
+        <button type="submit" name="export_type" value="pdf" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg">Export as PDF</button>
+        <button type="submit" name="export_type" value="txt" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg">Export as Text</button>
+    </form>
+</div>
 
-<h3>Search & Sort</h3>
-<form method="GET">
-    <label for="search">Search Emails:</label><br>
-    <input type="text" name="search" id="search" placeholder="Enter keywords"><br><br>
-    <label for="sort">Sort By:</label><br>
-    <select name="sort" id="sort">
-        <option value="priority">Priority</option>
-        <option value="sentiment">Sentiment</option>
-        <option value="tone">Tone</option>
-    </select><br><br>
-    <button type="submit" style="background-color: green; color: white; padding: 10px 20px;">Search & Sort</button>
-</form>
+<!-- Search & Sort Section -->
+<div class="mb-8">
+    <h3 class="text-xl font-semibold text-gray-700 mb-4">Search & Sort</h3>
+    <form method="GET" class="space-y-4">
+        <div>
+            <label for="search" class="block text-gray-600 font-medium mb-2">Search Emails:</label>
+            <input type="text" name="search" id="search" placeholder="Enter keywords" class="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+            <label for="sort" class="block text-gray-600 font-medium mb-2">Sort By:</label>
+            <select name="sort" id="sort" class="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="priority">Priority</option>
+                <option value="sentiment">Sentiment</option>
+                <option value="tone">Tone</option>
+            </select>
+        </div>
+        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg">Search & Sort</button>
+    </form>
+</div>
 
-<h3>Analytics</h3>
-<p><strong>Total Emails Analyzed:</strong> {{ analytics.total_emails }}</p>
-<p><strong>Sentiment Breakdown:</strong> Positive: {{ analytics.positive }}, Negative: {{ analytics.negative }}, Neutral: {{ analytics.neutral }}</p>
-<p><strong>Priority Breakdown:</strong> High: {{ analytics.high_priority }}, Medium: {{ analytics.medium_priority }}, Low: {{ analytics.low_priority }}</p>
+<!-- Analytics Section -->
+<div class="mb-8">
+    <h3 class="text-xl font-semibold text-gray-700 mb-4">Analytics</h3>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-indigo-50 p-4 rounded-lg shadow">
+            <p class="text-gray-600 font-medium">Total Emails Analyzed:</p>
+            <p class="text-2xl font-semibold text-indigo-600">{{ analytics.total_emails }}</p>
+        </div>
+        <div class="bg-indigo-50 p-4 rounded-lg shadow">
+            <p class="text-gray-600 font-medium">Sentiment Breakdown:</p>
+            <p class="text-gray-800">Positive: {{ analytics.positive }}</p>
+            <p class="text-gray-800">Negative: {{ analytics.negative }}</p>
+            <p class="text-gray-800">Neutral: {{ analytics.neutral }}</p>
+        </div>
+        <div class="bg-indigo-50 p-4 rounded-lg shadow">
+            <p class="text-gray-600 font-medium">Priority Breakdown:</p>
+            <p class="text-gray-800">High: {{ analytics.high_priority }}</p>
+            <p class="text-gray-800">Medium: {{ analytics.medium_priority }}</p>
+            <p class="text-gray-800">Low: {{ analytics.low_priority }}</p>
+        </div>
+    </div>
+</div>
 
-<h3>Analysis History</h3>
-<ul>
-    {% for analysis in analyses %}
-        <li>{{ analysis.subject }} - Priority: {{ analysis.priority }} - Timestamp: {{ analysis.timestamp }}</li>
-    {% endfor %}
-</ul>
-
-<form action="{{ url_for('logout') }}">
-    <button type="submit" style="background-color: red; color: white; padding: 10px 20px;">Logout</button>
-</form>
+<!-- Analysis History Section -->
+<div class="mb-8">
+    <h3 class="text-xl font-semibold text-gray-700 mb-4">Analysis History</h3>
+    {% if analyses %}
+        <ul class="space-y-2">
+            {% for analysis in analyses %}
+                <li class="p-3 bg-gray-50 rounded-lg shadow flex justify-between items-center">
+                    <span>{{ analysis.subject }} - <span class="priority-{{ analysis.priority }}">{{ analysis.priority | capitalize }}</span></span>
+                    <span class="text-gray-500 text-sm">{{ analysis.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="text-gray-500">No analysis history yet. Analyze some emails to see your history here.</p>
+    {% endif %}
+</div>
 {% endblock %}
